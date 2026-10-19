@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trader AI Bot - Netlify Dashboard</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;font-family:Segoe UI,Tahoma,Geneva,Verdana,sans-serif}
+body{background:#070b19;color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;padding:20px}
+.container{width:100%;max-width:420px;text-align:center}
+h1{font-size:24px;letter-spacing:1.5px;color:#00f3ff;text-shadow:0 0 10px #00f3ff66;margin-bottom:5px}
+.subtitle{font-size:11px;color:#8a99ad;letter-spacing:2px;margin-bottom:25px;text-transform:uppercase}
+.card{background:#0d162dcc;border:1px solid #00f3ff33;border-radius:16px;padding:18px;margin-bottom:15px;box-shadow:0 8px 32px #0006;text-align:left}
+.label{font-size:11px;color:#7b8cbe;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px}
+select{width:100%;background:#060d21;border:1px solid #00f3ff4d;color:#fff;padding:12px 15px;border-radius:10px;font-size:15px}
+.signal-box{text-align:center;padding:25px 15px;position:relative}
+.status-badge{position:absolute;top:15px;right:15px;background:#00ff8826;color:#00ff88;border:1px solid #00ff8866;padding:3px 10px;font-size:10px;border-radius:20px;letter-spacing:1px}
+.signal-output{font-size:20px;font-weight:bold;margin:15px 0 5px;letter-spacing:1px}
+.signal-details{font-size:13px;color:#a5b4fc;line-height:1.7;overflow-wrap:anywhere}
+.timer{font-size:42px;font-weight:bold;margin:20px 0;letter-spacing:2px}
+.btn{width:100%;background:linear-gradient(135deg,#00f3ff,#06f);border:0;color:#fff;padding:15px;border-radius:12px;font-size:16px;font-weight:bold;letter-spacing:1px;cursor:pointer;margin-bottom:12px}
+.btn:disabled{opacity:.55;cursor:not-allowed}
+.footer{margin-top:20px;font-size:10px;color:#4a5d85;letter-spacing:1px}
+</style>
+</head>
+<body>
+<div class="container">
+<h1>TRADER AI BOT</h1><div class="subtitle">Netlify Serverless Dashboard</div>
+<div class="card"><div class="label">Select Asset</div>
+<select id="assetSelect">
+<option value="EUR/USD">EUR/USD ⭐</option><option value="GBP/USD">GBP/USD</option>
+<option value="USD/JPY">USD/JPY</option><option value="XAU/USD">XAU/USD (GOLD) 🔥</option>
+<option value="BTC/USD">BTC/USD</option><option value="ETH/USD">ETH/USD</option>
+</select></div>
+<div class="card signal-box"><div class="status-badge" id="statusBadge">READY</div>
+<div class="label">Live Market Signal</div><div class="signal-output" id="signalText">--</div>
+<div class="signal-details" id="signalDetails">Press GET SIGNAL to analyze live data</div></div>
+<div class="timer" id="timerDisplay">01:00</div>
+<button class="btn" id="getSignalBtn" type="button">GET SIGNAL</button>
+<div class="footer">POWERED BY NETLIFY & TWELVE DATA</div>
+</div>
+<script>
+'use strict';
+let countdown=null, isCooldown=false;
+const assetSelect=document.getElementById('assetSelect');
+const signalText=document.getElementById('signalText');
+const signalDetails=document.getElementById('signalDetails');
+const statusBadge=document.getElementById('statusBadge');
+const btn=document.getElementById('getSignalBtn');
+const timerDisplay=document.getElementById('timerDisplay');
+function setStatus(status,color){statusBadge.textContent=status;if(color)statusBadge.style.color=color}
+function showError(message){
+ signalText.textContent='Error';signalText.style.color='#ff3366';
+ signalDetails.textContent=message||'Could not retrieve a signal.';
+ setStatus('FAILED','#ff3366');btn.disabled=false;isCooldown=false;
+}
+async function fetchSignal(){
+ if(isCooldown||btn.disabled)return;
+ btn.disabled=true;setStatus('ANALYZING','#ffaa00');
+ signalText.textContent='Fetching live data…';signalText.style.color='#fff';
+ signalDetails.textContent='Requesting a signal from the configured Netlify function.';
+ try{
+  const response=await fetch('/.netlify/functions/get_signal?symbol='+encodeURIComponent(assetSelect.value),{headers:{Accept:'application/json'}});
+  if(!response.ok)throw new Error('HTTP '+response.status+'. Netlify function deploy झाली आहे का ते तपासा.');
+  const data=await response.json();
+  if(data.error){showError(String(data.error));return}
+  const signal=String(data.signal||'NEUTRAL').toUpperCase();
+  if(signal==='BUY'){signalText.textContent='🟢 BUY SIGNAL';signalText.style.color='#00ff88';setStatus('SUCCESS','#00ff88')}
+  else if(signal==='SELL'){signalText.textContent='🔴 SELL SIGNAL';signalText.style.color='#ff3366';setStatus('SUCCESS','#00ff88')}
+  else{signalText.textContent='⚪ NEUTRAL';signalText.style.color='#ffaa00';setStatus('HOLD','#ffaa00')}
+  signalDetails.replaceChildren();
+  for(const [label,value] of [['Entry',data.price],['Take profit (TP)',data.tp],['Stop loss (SL)',data.sl],['RSI',data.rsi],['Score',data.score]]){
+   const line=document.createElement('div'),strong=document.createElement('strong');
+   strong.textContent=label+': ';line.appendChild(strong);
+   line.appendChild(document.createTextNode(value==null?'—':String(value)));signalDetails.appendChild(line);
+  }
+  startTimer(60);
+ }catch(error){showError(error instanceof Error?error.message:'Connection error. Please try again.')}
+}
+function startTimer(duration){
+ let remaining=duration;isCooldown=true;btn.disabled=true;clearInterval(countdown);
+ const render=()=>{timerDisplay.textContent=String(Math.floor(remaining/60)).padStart(2,'0')+':'+String(remaining%60).padStart(2,'0')};
+ render();countdown=setInterval(()=>{remaining--;render();if(remaining<=0){
+  clearInterval(countdown);countdown=null;timerDisplay.textContent='01:00';isCooldown=false;btn.disabled=false;setStatus('READY','#00ff88');
+ }},1000);
+}
+btn.addEventListener('click',fetchSignal);
+</script>
+</body>
+</html>
