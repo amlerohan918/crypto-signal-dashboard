@@ -60,7 +60,7 @@ async function fetchSignal(){
  signalText.textContent='Fetching live data…';signalText.style.color='#fff';
  signalDetails.textContent='Requesting a signal from the configured Netlify function.';
  try{
-  const response=await fetch('/.netlify/functions/get_signal?symbol='+encodeURIComponent(assetSelect.value),{headers:{Accept:'application/json'}});
+  const response = await fetch('/.netlify/functions/get_signal?symbol=' + encodeURIComponent(assetSelect.value));
   if(!response.ok)throw new Error('HTTP '+response.status+'. Netlify function deploy झाली आहे का ते तपासा.');
   const data=await response.json();
   if(data.error){showError(String(data.error));return}
