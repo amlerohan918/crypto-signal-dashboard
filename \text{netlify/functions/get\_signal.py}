@@ -1,0 +1,108 @@
+import json
+import os
+import requests
+import pandas as pd
+
+
+def handler(event, context):
+    query_params = event.get("queryStringParameters") or {}
+    symbol = query_params.get("symbol", "EUR/USD")
+
+    # Netlify environment variable
+    api_key = os.getenv("TWELVE_DATA_API_KEY")
+    if not api_key:
+        return {
+            "statusCode": 500,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps({"error": "TWELVE_DATA_API_KEY environment variable is not set"})
+        }
+
+    url = (
+        "https://api.twelvedata.com/time_series"
+        f"?symbol={symbol}&interval=30min&outputsize=100&apikey={api_key}"
+    )
+
+    try:
+        res = requests.get(url, timeout=10).json()
+        if "values" not in res:
+            return {
+                "statusCode": 200,
+                "headers": {"Content-Type": "application/json"},
+                "body": json.dumps({
+                    "error": res.get("message", "API limit reached or invalid symbol")
+                })
+            }
+
+        df = pd.DataFrame(res["values"])
+        df = df.iloc[::-1].reset_index(drop=True)
+        df["close"] = df["close"].astype(float)
+        df["high"] = df["high"].astype(float)
+        df["low"] = df["low"].astype(float)
+
+        # Technical indicators: EMA, RSI, ATR
+        df["ema_fast"] = df["close"].ewm(span=9, adjust=False).mean()
+        df["ema_slow"] = df["close"].ewm(span=21, adjust=False).mean()
+
+        delta = df["close"].diff()
+        gain = delta.where(delta > 0, 0).rolling(window=14).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+        rs = gain / loss
+        df["rsi"] = 100 - (100 / (1 + rs))
+
+        df["tr"] = df[["high", "low"]].max(axis=1) - df[["high", "low"]].min(axis=1)
+        df["atr"] = df["tr"].rolling(window=14).mean()
+
+        last_close = float(df["close"].iloc[-1])
+        last_rsi = df["rsi"].iloc[-1]
+        last_rsi = float(last_rsi) if not pd.isna(last_rsi) else 50.0
+        last_ema_fast = float(df["ema_fast"].iloc[-1])
+        last_ema_slow = float(df["ema_slow"].iloc[-1])
+        last_atr = df["atr"].iloc[-1]
+        last_atr = float(last_atr) if not pd.isna(last_atr) else last_close * 0.005
+
+        score = 0
+        if last_ema_fast > last_ema_slow:
+            score += 1
+        else:
+            score -= 1
+
+        if last_rsi > 55:
+            score += 1
+        elif last_rsi < 45:
+            score -= 1
+
+        signal = "HOLD"
+        if score >= 1:
+            signal = "BUY"
+        elif score <= -1:
+            signal = "SELL"
+
+        if signal == "BUY":
+            tp = round(last_close + (last_atr * 2), 4)
+            sl = round(last_close - last_atr, 4)
+        elif signal == "SELL":
+            tp = round(last_close - (last_atr * 2), 4)
+            sl = round(last_close + last_atr, 4)
+        else:
+            tp = None
+            sl = None
+
+        return {
+            "statusCode": 200,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps({
+                "signal": signal,
+                "price": last_close,
+                "tp": tp,
+                "sl": sl,
+                "rsi": round(last_rsi, 1),
+                "score": f"{abs(score)}/2"
+            })
+        }
+
+    except Exception as e:
+        return {
+            "statusCode": 500,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps({"error": str(e)})
+        }
